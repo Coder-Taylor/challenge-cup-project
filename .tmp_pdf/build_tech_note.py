@@ -1,0 +1,332 @@
+from pathlib import Path
+
+from PIL import Image, ImageDraw, ImageFont
+from docx import Document
+from docx.enum.table import WD_ALIGN_VERTICAL, WD_TABLE_ALIGNMENT
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
+from docx.shared import Cm, Pt, RGBColor
+
+
+ROOT = Path(__file__).resolve().parent.parent
+TEMP = Path(__file__).resolve().parent
+OUT = ROOT / "医影知微_科技说明_初版.docx"
+
+
+def set_font(style, east_asia, western, size, bold=False, color=None):
+    style.font.name = western
+    style.font.size = Pt(size)
+    style.font.bold = bold
+    if color:
+        style.font.color.rgb = RGBColor(*color)
+    rpr = style.element.get_or_add_rPr()
+    fonts = rpr.rFonts
+    if fonts is None:
+        fonts = OxmlElement("w:rFonts")
+        rpr.insert(0, fonts)
+    fonts.set(qn("w:eastAsia"), east_asia)
+    fonts.set(qn("w:ascii"), western)
+    fonts.set(qn("w:hAnsi"), western)
+
+
+def shade(cell, fill):
+    tcpr = cell._tc.get_or_add_tcPr()
+    shd = tcpr.find(qn("w:shd"))
+    if shd is None:
+        shd = OxmlElement("w:shd")
+        tcpr.append(shd)
+    shd.set(qn("w:fill"), fill)
+
+
+def border_table(table):
+    tblpr = table._tbl.tblPr
+    borders = tblpr.find(qn("w:tblBorders"))
+    if borders is None:
+        borders = OxmlElement("w:tblBorders")
+        tblpr.append(borders)
+    for edge in ("top", "left", "bottom", "right", "insideH", "insideV"):
+        tag = qn("w:" + edge)
+        element = borders.find(tag)
+        if element is None:
+            element = OxmlElement("w:" + edge)
+            borders.append(element)
+        element.set(qn("w:val"), "single")
+        element.set(qn("w:sz"), "5")
+        element.set(qn("w:color"), "D9D9D9")
+
+
+def set_cell_margin(cell, top=100, start=120, bottom=100, end=120):
+    tc = cell._tc
+    tcpr = tc.get_or_add_tcPr()
+    margins = tcpr.first_child_found_in("w:tcMar")
+    if margins is None:
+        margins = OxmlElement("w:tcMar")
+        tcpr.append(margins)
+    for side, value in (("top", top), ("start", start), ("bottom", bottom), ("end", end)):
+        child = margins.find(qn("w:" + side))
+        if child is None:
+            child = OxmlElement("w:" + side)
+            margins.append(child)
+        child.set(qn("w:w"), str(value))
+        child.set(qn("w:type"), "dxa")
+
+
+def add_table(doc, headers, rows, widths):
+    table = doc.add_table(rows=1, cols=len(headers))
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    table.autofit = False
+    border_table(table)
+    for j, label in enumerate(headers):
+        cell = table.rows[0].cells[j]
+        cell.width = Cm(widths[j])
+        cell.text = label
+        shade(cell, "E6EDF3")
+        cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+        set_cell_margin(cell)
+        for p in cell.paragraphs:
+            p.style = doc.styles["TableText"]
+            for run in p.runs:
+                run.bold = True
+    trpr = table.rows[0]._tr.get_or_add_trPr()
+    trpr.append(OxmlElement("w:tblHeader"))
+    for i, values in enumerate(rows):
+        cells = table.add_row().cells
+        for j, value in enumerate(values):
+            cells[j].width = Cm(widths[j])
+            cells[j].text = value
+            cells[j].vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+            set_cell_margin(cells[j])
+            if i % 2:
+                shade(cells[j], "F7F9FB")
+            for p in cells[j].paragraphs:
+                p.style = doc.styles["TableText"]
+    return table
+
+
+def add_body(doc, text):
+    previous = doc.element.body[-2] if len(doc.element.body) > 1 else None
+    p = doc.add_paragraph(style="BodyText")
+    if previous is not None and previous.tag == qn("w:tbl"):
+        p.paragraph_format.space_before = Pt(7)
+    p.add_run(text)
+    return p
+
+
+def add_heading(doc, text, level=1):
+    return doc.add_paragraph(text, style="Section" if level == 1 else "Subsection")
+
+
+def add_caption(doc, text):
+    return doc.add_paragraph(text, style="FigureCaption")
+
+
+def make_flow_image():
+    width, height = 2200, 330
+    image = Image.new("RGB", (width, height), "white")
+    d = ImageDraw.Draw(image)
+    font_path = Path("C:/Windows/Fonts/msyh.ttc")
+    if not font_path.exists():
+        font_path = Path("C:/Windows/Fonts/simsun.ttc")
+    title_font = ImageFont.truetype(str(font_path), 40)
+    note_font = ImageFont.truetype(str(font_path), 28)
+    boxes = [
+        ("医学影像与问题", "同一影像可提出不同问题"),
+        ("图文联合处理", "视觉信息与问题语义对齐"),
+        ("模型生成回答", "SFT 与 GRPO 后训练研究"),
+        ("查看与专业复核", "显示结果并由使用者判断"),
+    ]
+    xs = [35, 590, 1145, 1700]
+    for i, (title, note) in enumerate(boxes):
+        x = xs[i]
+        d.rounded_rectangle((x, 55, x + 465, 270), radius=20, fill="#EEF3F8", outline="#97ACC1", width=4)
+        tb = d.textbbox((0, 0), title, font=title_font)
+        nb = d.textbbox((0, 0), note, font=note_font)
+        d.text((x + (465 - (tb[2] - tb[0])) / 2, 106), title, fill="#1F3D5B", font=title_font)
+        d.text((x + (465 - (nb[2] - nb[0])) / 2, 176), note, fill="#526477", font=note_font)
+        if i < 3:
+            ax = x + 495
+            d.line((ax, 161, ax + 42, 161), fill="#557C9E", width=6)
+            d.polygon([(ax + 40, 146), (ax + 60, 161), (ax + 40, 176)], fill="#557C9E")
+    path = TEMP / "tech_flow.png"
+    image.save(path)
+    return path
+
+
+doc = Document()
+sec = doc.sections[0]
+sec.page_width = Cm(21)
+sec.page_height = Cm(29.7)
+sec.top_margin = Cm(2.35)
+sec.bottom_margin = Cm(2.25)
+sec.left_margin = Cm(2.55)
+sec.right_margin = Cm(2.55)
+sec.header_distance = Cm(1.2)
+sec.footer_distance = Cm(1.2)
+
+styles = doc.styles
+set_font(styles["Normal"], "宋体", "Times New Roman", 10.5)
+styles["Normal"].paragraph_format.line_spacing = 1.4
+set_font(styles["Title"], "黑体", "Times New Roman", 18, bold=True, color=(0, 0, 0))
+title_ppr = styles["Title"].element.get_or_add_pPr()
+for border in title_ppr.findall(qn("w:pBdr")):
+    title_ppr.remove(border)
+styles["Title"].paragraph_format.space_after = Pt(11)
+styles["Title"].paragraph_format.keep_with_next = True
+
+for name in ("BodyText", "Section", "Subsection", "FigureCaption", "TableText", "MetaText", "SourceText"):
+    if name not in styles:
+        styles.add_style(name, 1)
+set_font(styles["BodyText"], "宋体", "Times New Roman", 10.5)
+styles["BodyText"].paragraph_format.first_line_indent = Cm(0.74)
+styles["BodyText"].paragraph_format.line_spacing = 1.45
+styles["BodyText"].paragraph_format.space_after = Pt(7)
+set_font(styles["Section"], "黑体", "Times New Roman", 13, bold=True, color=(0, 0, 0))
+styles["Section"].paragraph_format.space_before = Pt(15)
+styles["Section"].paragraph_format.space_after = Pt(7)
+styles["Section"].paragraph_format.keep_with_next = True
+set_font(styles["Subsection"], "黑体", "Times New Roman", 11, bold=True, color=(0, 0, 0))
+styles["Subsection"].paragraph_format.space_before = Pt(9)
+styles["Subsection"].paragraph_format.space_after = Pt(5)
+styles["Subsection"].paragraph_format.keep_with_next = True
+set_font(styles["FigureCaption"], "宋体", "Times New Roman", 9.5, color=(45, 45, 45))
+styles["FigureCaption"].paragraph_format.space_before = Pt(5)
+styles["FigureCaption"].paragraph_format.space_after = Pt(9)
+styles["FigureCaption"].paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
+set_font(styles["TableText"], "宋体", "Times New Roman", 9)
+styles["TableText"].paragraph_format.line_spacing = 1.2
+styles["TableText"].paragraph_format.space_after = Pt(0)
+set_font(styles["MetaText"], "宋体", "Times New Roman", 9.5, color=(65, 65, 65))
+styles["MetaText"].paragraph_format.space_after = Pt(4)
+set_font(styles["SourceText"], "宋体", "Times New Roman", 9)
+styles["SourceText"].paragraph_format.line_spacing = 1.3
+styles["SourceText"].paragraph_format.space_after = Pt(4)
+
+p = doc.add_paragraph(style="Title")
+p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+p.add_run("医影知微多模态医学影像辅助识别与智能问答系统科技说明")
+p = doc.add_paragraph(style="MetaText")
+p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+p.add_run("科技发明制作研究报告初版  ·  供项目组核对  ·  2026年10月31日")
+
+add_heading(doc, "摘要")
+add_body(doc, "本作品面向医学影像使用中“同图多问”的需求，制作接收影像和文字问题、生成对应回答并支持人工复核的医学图文问答系统。相关研究基于公开医学影像构建五类问答任务，采用组互斥数据划分、成对监督目标、GRPO后训练和视觉输入干预，检验回答是否真正利用影像。现有研究实验在1336道D3—D5组互斥主要题上，完整GRPO的微平均准确率为66.09%，比训练范围匹配的继续SFT高6.81个百分点；第三方对软件V1.0的D1、D2专项测试综合准确率为96.51%（共1634题）。两类结果来自不同测试任务，应分别理解。作品的主要创新在于将可追溯数据、可归因后训练比较和可操作的影像问答流程结合起来。")
+p = doc.add_paragraph(style="MetaText")
+p.add_run("关键词：医学影像；视觉问答；多模态大模型；GRPO；可验证评估")
+
+add_heading(doc, "一、制作目的与作品定位")
+add_body(doc, "CT、MRI、超声等医学影像包含丰富信息，但使用者对同一影像提出的问题并不相同：有时需要辨识成像模态或解剖部位，有时需要判断病灶是否存在、位于何处。单一类别输出难以直接回应变化的提问目标。本作品以“影像＋问题”为统一输入，让图像提供内容、文字限定回答任务，在界面中呈现结果并保留使用者复核环节。")
+add_body(doc, "这一需求在医学教学和科研中具有直观表现。面对同一幅图像，初学者首先关心它是什么检查、显示哪个部位，进一步又会追问可见异常及其大致位置。如果系统只给出一个固定标签，使用者需要在多个工具之间切换，也难以判断回答究竟依据影像还是依据题目文字。视觉问答将影像证据与具体提问放在同一次交互中，但医学场景中的相似组织、微小病灶和模态差异也提高了对数据、模型和验证方式的要求。")
+add_body(doc, "制作目标有三项：一是形成可以演示的影像上传、提问、回答和查看流程；二是用可追溯的医学视觉问答数据支持模型训练与评价；三是通过受控对照区分任务适配收益、后训练收益和非视觉先验，避免把单一准确率误认为完整的医学理解能力。作品现阶段面向案例学习、科研试验和辅助分析，输出不替代专业诊断。")
+add_body(doc, "因此，本说明把“能做什么”和“证据证明到哪里”同时作为作品目标。基础层检验成像模态和解剖部位的识别，进阶层检验病灶存在、粗区域定位及来源支持的类别判断，使用层检验影像输入、提问、结果展示和复核是否形成完整流程。各层指标并非同一个准确率的不同说法：前两类任务对应第三方报告的指定测试，后三类任务主要来自团队研究实验，系统演示则说明作品载体已经形成。")
+
+add_heading(doc, "二、制作过程与技术方案")
+add_heading(doc, "（一）任务与数据组织", 2)
+add_body(doc, "相关研究建立了内部版本MCQ-RL-V1，以“病例—问题”为基本单元，将公开数据中已有可信标注转为确定性单答案问题。现有材料记载共8000个病例、27549个问题、12个公开来源，覆盖成像模态识别D1、解剖部位识别D2、病灶存在判断D3、3×3粗区域定位D4和数据源支持的类别识别D5。数据保留来源、影像路径、答案和分组键；同一患者、病灶或体数据只进入一个划分，用于减少同源样本泄漏。D3—D5构成主要研究评价任务。")
+add_body(doc, "数据组织并非简单把影像复制成若干提问。每条记录附有稳定样本编号、数据源、图像路径和必要的几何信息，便于从结果返回底层病例；划分时使用分组键，使同一患者、同一研究、同一病灶或同一体数据中的相关图像保持在同一侧。研究材料记载病例训练、验证、测试划分分别为6587、596和817例；主要任务D3—D5的相应问题行数分别为9233、980和1336。由于一个病例可以产生不止一道问题，病例数和问题数不能直接相加或相互替代。")
+add_body(doc, "五类问题对应不同证据需求。D1检验影像成像方式，D2检验解剖上下文，D3对目标发现作存在或不存在判断，D4把图像划成3×3网格并要求粗定位，D5仅在数据源本身具有可靠类别标签时生成分类题。D1、D2使用训练词表定义答案；D3采用二选一答案；D5从各来源支持的类别中选取至多九个候选项。选项顺序和干扰项通过固定种子确定，保证重复实验面对同一题面，避免随机改题干扰模型比较。")
+add_body(doc, "在质量控制上，数据构建流程检查样本编号唯一、同一输入答案一致、训练词表覆盖评估标签、每题只有一个金标准选项以及划分组互斥等条件，并过滤边界或类别存在歧义的候选题。保留题目同时生成“仅答案”和“理由＋答案”两种监督视图；两种视图面对同一病例和同一问题，仅改变输出目标。这样的成对设计使监督形式的影响可以被观察，也为后续检查格式有效性和图像依赖性提供一致的比较基础。")
+add_body(doc, "数据生成遵循“原始标签能支持什么，就提出什么问题”的原则：模态与部位题检验基本影像信息，病灶存在、粗区域和类别题则分别依赖相应的可靠标注。对于缺少类别或位置依据的来源，不应强行补造该类问题；九宫格位置也只表示粗区域，不能写成精确病灶边界。将题目粒度限制在证据允许的范围内，并保留源图、问题与答案的对应关系，有助于发现标签错误和规则冲突，比单纯扩大题目数量更能保证后续比较有意义。")
+add_heading(doc, "（二）图文模型与后训练", 2)
+add_body(doc, "研究实验采用Qwen3-VL-4B-Instruct作为可训练骨干，先进行监督微调（SFT），比较“仅输出答案”和“给出理由再输出答案”两种目标；随后从带理由的SFT模型出发，对D3—D5开展GRPO优化。GRPO的可验证奖励综合答案正确性、格式有效性和长度约束，在语言模型及visual merger上施加LoRA更新。为判断增益来源，研究设置训练样本、顺序、随机种子和可训练范围相匹配的继续SFT对照，并用原图、空白图和无图输入进行视觉干预。")
+add_body(doc, "监督微调阶段把问题和医学影像同时送入视觉—语言骨干，使模型学习从视觉内容中提取与提问相关的信息，再按规定格式输出答案。研究中两条SFT轨道使用同批22407个问题、训练一个epoch，视觉塔及投影器保持冻结，通过语言侧LoRA更新适配任务；LoRA秩为32，缩放系数为64。采用三个随机种子分别训练，可以观察数据顺序和参数初始化带来的波动，避免把一次运行的偶然差异写成稳定改进。")
+add_body(doc, "带理由监督不等同于已经获得临床可解释性。研究材料中的理由来自可归一化的证据或上游说明，训练时把理由与最终答案放在指定标签中，便于检查模型是否遵守输出接口；仅答案监督则减少了额外生成目标。两种方法各有作用：前者便于规范格式和展示中间说明，后者在现有D3—D5测试中取得更高的总体准确率。因此，作品不会以“理由更长”替代“结论更可靠”的证据，而是把准确率、格式和视觉依据分别检验。")
+add_body(doc, "GRPO阶段从带理由SFT的检查点继续，只使用D3—D5的9233条主要任务训练问题。每个提示生成八个候选回答，以答案是否正确为主要奖励，同时加入格式是否有效、理由长度是否在约定范围内的辅助约束；原始权重分别为1.0、0.2和0.1，再按总权重归一，非法答案标签不计奖励。训练时在语言模型与视觉合并模块上进行LoRA更新，保留视觉塔冻结，并在评估时使用确定性解码。奖励的定义基于可判定的选择题和格式要求，并不直接评价临床建议质量。")
+add_body(doc, "为了避免把模型可训练参数增多误判为GRPO算法收益，研究同时设置只更新语言侧的继续SFT与更新范围匹配的继续SFT。对照使用同一批主要任务样本、同样的样本顺序和相应随机种子，尽量对齐学习率和有效批大小；范围匹配对照与GRPO覆盖相同的语言模块及视觉合并模块。最终比较的含义是“在这套数据、训练配置和测试协议下，完整GRPO相对匹配继续SFT的差异”，而不是对所有医学影像任务的无条件提升。")
+add_body(doc, "比较时还需把答案正确与格式合规拆开：模型即使稳定输出规定标签，也可能判断错具体影像；只看选择题得分，则可能忽略输出无法解析的问题。研究把两项指标分别记录，便于判断后训练改善的是任务判断、答题格式，还是两者兼有。再结合原图、空白图与无图的同题比较，能够沿着训练条件、回答结果和影像证据逐步核查收益来源。这一验证链是本作品创新性的核心，而不是仅给模型增加一道训练工序。")
+add_body(doc, "评价协议除主任务答案正确率外，还记录答案是否能被正确解析、格式是否符合约定，以及D1、D2辅助能力是否保持。组互斥主要测试集包含1336道题、743个依赖组，与训练和验证集没有同组样本或精确图像重叠；外部结直肠组织图像集则用于检验同一类别答案空间下的迁移。对同一道题分别输入原图、空白图和无图，可以在题面不变时观察影像证据带来的差异。若无图仍能取得较高分数，就必须谨慎解释模型是否利用了来源、选项或语言先验。")
+add_heading(doc, "（三）系统实现与操作流程", 2)
+add_body(doc, "答辩材料展示的作品流程是：使用者导入医学影像，输入与该影像有关的问题，系统联合处理图像与问题后给出回答，使用者查看结果并作专业复核。现有材料展示了胸部影像的上传、运行及结果查看场景。第三方报告的受测样品名称为“多模态医学影像病灶辅助识别与智能问答系统（V1.0）”；其中训练对象名称写作MedSight-VL，与上述研究骨干的版本关系仍需项目组核对，因此本稿分别陈述研究实验和受测软件。")
+add_body(doc, "就可见的操作链而言，影像上传解决输入载体问题，文字提问明确本次要回答的任务，模型运行产生与问题相关的答复，结果界面让使用者查看并复核。与直接输出一个固定标签相比，这种流程把“同图多问”转为可操作的系统行为。初版只依据现有演示材料描述已经展示的功能，不把多机构部署、电子病历正式接入或自动形成治疗建议写成该作品已经验收的能力。")
+add_body(doc, "对评审展示而言，问题可以按D1、D2到D3—D5的顺序组织：先说明系统能识别哪些基本影像信息，再展示目标存在、粗定位和类别判断如何随提问变化。这样的顺序帮助观众理解“同图多问”的实际含义，也能避免把单张演示图的表现误作总体准确率。本稿插入的问答界面为局部运行截图；完整操作证据仍需在正式版中与参赛软件版本和测试材料逐项对应。")
+
+p = doc.add_paragraph()
+p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+p.add_run().add_picture(str(make_flow_image()), width=Cm(15.5))
+add_caption(doc, "图1 作品工作流程示意（依据现有答辩材料整理）")
+
+p = doc.add_paragraph()
+p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+p.paragraph_format.keep_with_next = True
+p.add_run().add_picture(str(ROOT / "assets" / "b95945ac89bf5186170b732fca68081c.jpg"), width=Cm(15.5))
+add_caption(doc, "图2 影像问答界面局部运行截图")
+add_body(doc, "图2展示用户输入问题与模型返回答复的局部界面；其中回答仅为运行示例，不作为临床诊断性能的证明。")
+
+add_heading(doc, "三、结果与验证")
+add_body(doc, "研究实验与第三方专项测试的任务和样品不同。下列结果按证据来源分列；百分比均限定在相应测试集与协议内。")
+add_body(doc, "从评价对象看，D1、D2分别回答“这是什么影像”和“影像显示哪里”等基础问题；D3—D5进一步要求判断目标是否存在、指出粗区域及区分指定类别。基础题得分较高，不能自动说明病灶判断同样准确；选择题结果也不能直接换算成自由问答或临床诊断能力。因此，结果表中的任务、样本量、模型版本和比较对象均应与准确率一起阅读。")
+add_caption(doc, "表1 团队研究实验的医学视觉问答结果")
+add_table(doc,
+    ["验证项目", "比较条件", "结果", "适用范围"],
+    [
+        ["成对SFT", "仅答案监督 / 理由＋答案监督", "62.03% / 56.74%", "D3—D5；三组随机种子均值，跨轨道描述性比较"],
+        ["匹配后训练", "完整GRPO / 范围匹配继续SFT", "66.09% / 59.28%；差值＋6.81个百分点", "1336道组互斥主要题；差值95% CI为[4.79, 8.92]"],
+        ["外部档案", "完整GRPO / 范围匹配继续SFT", "72.44% / 59.64%；差值＋12.80个百分点", "CRC-VAL-HE-7K，7180张图像，同一D5标签空间"],
+    ], [2.7, 4.2, 4.0, 4.9])
+add_body(doc, "成对SFT结果显示，较短的仅答案目标在D3—D5合并题上达到62.03%，带理由目标为56.74%。这一差异属于两条监督轨道的描述性比较，不能单独推出“理由必然有害”；不同目标也会改变生成长度和格式要求。另一方面，带理由训练把严格标签有效性由零样本条件下的0%提升到100%，说明模型可以学习规定的回答格式。评价作品时，应把答案正确、输出可解析和理由是否有真实视觉根据区分开。")
+add_body(doc, "在最关键的后训练对照中，完整GRPO与范围匹配的继续SFT分别达到66.09%和59.28%，差值为6.81个百分点，报告给出的95%置信区间为4.79至8.92个百分点。分任务观察，D3病灶存在判断为78.52%对67.64%，D4粗区域定位为58.10%对53.91%，D5类别识别为59.57%对54.84%。三项均有改善，但D4和D5的绝对准确率仍低于D3；这提醒后续工作不能只凭合并平均值掩盖定位与细分类难题。")
+add_body(doc, "视觉控制给出了更具体的边界：在同一组互斥测试中，GRPO相对匹配继续SFT在原图条件下高6.81个百分点，改用空白图时差值转为负4.99个百分点；无图输入的差值为正2.22个百分点，但来源宏平均的区间包含零。这一组合表明原图确实对主要收益有贡献，同时也显示问法、选项或数据来源可能提供部分非视觉提示。作品因此把视觉干预作为结果解释的组成部分，而不是把单次原图准确率等同于模型“看懂了影像”。")
+add_body(doc, "外部结直肠组织图像测试在与训练词表相同的九类答案空间内进行，完整GRPO为72.44%，匹配继续SFT为59.64%，差值12.80个百分点。该结果说明所研究配置在一个外部档案上仍有增益；但类别词表相同、测试对象集中在特定组织图像，不能据此推断所有影像模态、疾病或医院均能达到相同水平。后续跨域验证仍需要明确病例来源、设备、标注标准和医生复核方式。")
+
+add_caption(doc, "表2 第三方对受测软件V1.0的专项测试结果")
+add_table(doc,
+    ["测试项目", "测试设置", "结果", "解释边界"],
+    [
+        ["指定任务精度", "D1与D2各817题，共1634题", "综合96.51%；D1为99.88%，D2为93.15%", "限于成像模态与解剖部位识别，不代表D3—D5或临床诊断精度"],
+        ["训练吞吐", "统一硬件与训练协议；MedSight-VL与LLaVA-1.5-7B对比", "14.630 / 5.881 samples/s；提升148.77%", "仅为报告约定的训练效率比较"],
+        ["问答响应", "暖模型、单用户、单张冻结影像，连续10次", "平均0.531秒；最短0.402秒，最长0.664秒", "不代表多用户或全流程时延"],
+    ], [2.7, 4.2, 4.0, 4.9])
+add_body(doc, "第三方专项报告检验的样品是一套软件系统V1.0，受检单位包括河南大学、中国科学院大学和河南省人民医院，报告由河南省电子规划研究院有限责任公司测评中心出具，检验日期为2026年9月1日至10日。检测范围依据任务书约定的技术产出指标，覆盖训练效率、指定任务预测精度和响应速度。它提供了独立测试记录，但报告的对象、范围与团队内部D3—D5实验不同，故两者在本稿中分别编号、分别解释。")
+add_body(doc, "报告正文的训练吞吐是在相同硬件与训练协议下比较：受测MedSight-VL的Trainer吞吐为每秒14.630个样本，对照LLaVA-1.5-7B为每秒5.881个样本，按前者相对后者计算提高148.77%。该比较说明指定配置下的训练处理速度，不等于模型回答正确率，也不直接反映医院实际部署成本。第三方报告另列服务器端双RTX 5090、128GB内存等环境条件；更换硬件或并发规模后，应重新测试而非沿用原数值。")
+add_body(doc, "指定精度测试冻结D1、D2测试题，每类817题，合计1634题。受测模型D1为99.88%、D2为93.15%，合并为96.51%。响应测试则在暖模型、单用户、单张冻结影像条件下连续记录十次从提问到返回完整回答的全链路耗时，平均0.531秒，最短0.402秒，最长0.664秒。两项结果都来自明确的测试边界：若换成未见疾病、批量影像或多用户同时访问，需要重新测量精度和时延。")
+add_body(doc, "第三方报告的总检验结论为本次覆盖范围内的结果符合测试要求。上述数值可支撑作品在指定任务和环境下的性能陈述，但不能直接推导开放式医学推理、跨医院泛化或实际临床获益。")
+
+add_heading(doc, "四、作品创新点")
+add_heading(doc, "（一）把数据可追溯性与图像依赖性一起设计", 2)
+add_body(doc, "数据构建以病例和问题为稳定单元，同时保留来源及分组血缘；同一题可以分别形成仅答案和带理由两种监督视图。组互斥划分减少同源样本进入训练和测试两侧的风险，原图、空白图与无图对照进一步检查模型是否真正使用视觉信息。这使“答对多少”之外的证据来源也可被检验。")
+add_body(doc, "这一创新更强调实验设计的可信度，而不是宣称使用了全新的影像模态。医学图像常包含同一病例的多张切片或相邻视角，若将它们随机散入训练和测试，模型可能识别了重复特征，却未真正学会迁移。将样本组互斥、对同题保持一致问题和答案空间，再改变监督形式或视觉输入，能把潜在泄漏、任务接口适配和图像贡献分别暴露出来。这样的数据结构也便于团队在发现错误答案时回溯其来源和生成规则。")
+add_heading(doc, "（二）以匹配对照识别后训练的实际增益", 2)
+add_body(doc, "作品不只比较优化前后的分数，而将GRPO与使用同批主要题、相近更新范围及相同随机种子的继续SFT比较。在这一明确条件下，完整GRPO在D3—D5组互斥题上取得6.81个百分点的优势，并报告置信区间。成对目标与视觉干预共同帮助界定该优势的适用范围，也提示仍需处理非视觉先验。")
+add_body(doc, "方法上的关键是让奖励与可检验的输出相连，同时把比较条件锁定到足够接近。答案正确性对应任务目标，格式有效性保证答案可解析，长度约束控制生成形式；若只比较GRPO和原始SFT起点，则继续训练时长、样本暴露与更新模块都可能解释分数变化。加入语言侧和范围匹配的继续SFT后，6.81个百分点才有更清楚的相对含义。这一结果支撑的是本实验条件下的后训练方案，而非对所有强化学习方法或全部医疗任务的普遍优越性。")
+add_heading(doc, "（三）把研究结果落到可操作的问答流程", 2)
+add_body(doc, "系统层面的价值在于让研究问题有明确的使用入口和反馈出口：使用者先决定当前要问什么，模型再依据影像和问题给出有限范围的答复，结果最后由人判断是否合理。这样的工作流容易展示，也便于将错误案例回流到题目设计和模型评估。系统演示、研究实验和独立检测分别回答“能否操作”“方法在指定题上效果如何”“受测软件在约定环境下表现如何”，共同构成作品证据链，同时保留各自边界。")
+
+add_heading(doc, "五、应用情况与前景")
+add_body(doc, "在教学场景，教师可以围绕同一公开或已获授权的影像逐步提出模态、部位、目标有无和大致区域等问题，让学习者对照影像解释答案。系统的作用是提供交互和讨论素材，而不是自动判定学生或患者的最终医学结论。在科研场景，固定题目、划分和指标便于重复训练、比较提示方式与后训练方法，也便于检查模型在不同来源影像上的错误类型。上述场景属于可行应用方向，具体教学或临床使用效果仍须另行评价。")
+add_body(doc, "若进一步面向医疗机构内的辅助分析，除模型准确率外，还需确认输入影像的质量、患者信息授权、数据存储与传输方式、回答不确定性以及人工复核责任。对于超出模型已验证范围的问题，系统应避免把不确定回答包装成确定诊断。现有第三方报告覆盖的是专项性能指标，不能代替医院伦理审批、真实病例多中心验证和医疗器械相关要求；本作品的应用前景应以这些后续条件能否满足为前提。")
+
+add_heading(doc, "六、不足与改进计划")
+add_body(doc, "当前研究主要以公开数据和确定性单答案任务验证，问题范围、候选答案空间与真实临床开放式问答仍有距离；组互斥和外部档案测试虽提高了评价可信度，仍不能替代多中心、前瞻性及医生参与的临床验证。视觉干预也表明部分回答可能受到题面和来源先验影响。")
+add_body(doc, "另外，不同医学数据来源的病种分布、图像分辨率和标注标准并不一致。即便在组互斥条件下，模型也可能借助成像风格、选项组成或来源特征作答。D4的九宫格定位仅能描述粗区域，不能替代精确分割或病灶边界测量；D5受原始数据提供的标签种类限制，不能覆盖未列出的疾病。研究用Qwen3-VL骨干与第三方受测MedSight-VL之间的关系目前缺少同一版本的明示映射，这也限制了将两份结果合并为单一性能陈述。")
+add_body(doc, "下一步拟核对研究模型与受测软件的版本对应关系，建立模型、数据和报告的一一映射；补充临床专家复核、错误类型与不确定性分析；在合规授权的数据条件下扩展跨机构评估，并完善隐私保护、系统日志和使用边界说明。正式参赛前还需确认当届通知、测试报告信息使用范围，以及与本作品直接对应的成果证明。")
+p = add_body(doc, "改进工作可按证据链推进：先冻结参赛软件版本，记录训练数据版本、模型权重、推理配置和界面截图；再为D3—D5及开放式提问整理医生复核样本，分别统计错误答案、模糊图像、跨设备数据和无图仍可作答等情形；最后在得到数据授权的前提下开展跨机构测试，并同时记录精度、响应和失败案例。只有当新的测试对象、样本和条件明确后，才把新增结果写入正式说明，避免把研究设想写成已经实现的应用。")
+p.paragraph_format.keep_together = True
+
+add_heading(doc, "资料依据与初版说明")
+for line in (
+    "[1] 《科技报告-多模态医学影像数据大模型构建及应用》，“医学视觉问答数据集构建与可验证后训练归因评估方法”一节。",
+    "[2] 《医影知微》答辩PPT，作品定位、技术流程、系统展示与研究实验摘要。",
+    "[3] 第三方检测报告DZYTC/BG/2026858117，扫描件第4、12、13、16页；报告所列测试环境、样品和任务范围以原件为准。",
+    "[4] 《附件1：河南大学第十七届“挑战杯”大学生课外学术科技作品参赛作品格式规范》，科技发明制作与文本编写要求。",
+):
+    doc.add_paragraph(line, style="SourceText")
+p = doc.add_paragraph(style="SourceText")
+p.add_run("初版说明：").bold = True
+p.add_run("本稿供项目组核对；团队署名、受测版本关系、完整操作截图与支撑材料编号待补。")
+
+footer = sec.footer.paragraphs[0]
+footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
+footer.add_run("医影知微科技说明初版  ·  第 ")
+field = OxmlElement("w:fldSimple")
+field.set(qn("w:instr"), "PAGE")
+footer._p.append(field)
+footer.add_run(" 页")
+
+doc.core_properties.title = "医影知微多模态医学影像辅助识别与智能问答系统科技说明"
+doc.core_properties.subject = "科技发明制作研究报告初版"
+doc.core_properties.keywords = "医学影像,视觉问答,GRPO,挑战杯"
+doc.save(OUT)
+char_count = sum(len(p.text) for p in doc.paragraphs) + sum(len(c.text) for t in doc.tables for row in t.rows for c in row.cells)
+print(f"created={OUT}")
+print(f"estimated_characters={char_count}")
+print(f"tables={len(doc.tables)}")

@@ -1,0 +1,9 @@
+# 临时构建产物（PDF 逐页渲染图、docx 解包目录），不入库
+.tmp_pdf/*.png
+.tmp_pdf/*.jpg
+.tmp_pdf/docx_render/
+
+# Office 临时锁文件
+~$*.docx
+~$*.pptx
+~$*.xlsx
