@@ -1,9 +1,18 @@
-# 临时构建产物（PDF 逐页渲染图、docx 解包目录），不入库
-.tmp_pdf/*.png
-.tmp_pdf/*.jpg
-.tmp_pdf/docx_render/
+# 临时构建产物（页面渲染图、docx 解包目录、备份稿），工具脚本已移至 tools/
+.tmp_pdf/
 
-# Office 临时锁文件
+# Office 临时/锁文件
 ~$*.docx
 ~$*.pptx
 ~$*.xlsx
+
+# 系统与编辑器
+Thumbs.db
+desktop.ini
+.DS_Store
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.pyc
