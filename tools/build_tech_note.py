@@ -1,3 +1,12 @@
+"""
+文件用途：生成早期 Word 初稿及其流程图的历史脚本。
+输入：脚本内固定的旧版正文，以及 assets/ 中的问答界面截图。
+输出：覆盖根目录“医影知微_科技说明_初版.docx”，并在脚本目录生成 tech_flow.png。
+依赖：python-docx、Pillow，以及脚本指定的本机字体。
+当前状态：正文与八章 Markdown 主稿不同步，保留作排版实现参考；不是当前主稿的导出工具。
+执行影响：运行会用旧正文重新生成 Word，可能覆盖后续排版修改。
+"""
+
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont

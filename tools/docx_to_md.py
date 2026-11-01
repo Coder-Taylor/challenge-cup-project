@@ -1,4 +1,10 @@
-"""Create the collaborative Markdown manuscript from the current Word draft."""
+"""
+文件用途：将早期 Word 初稿转换为 Markdown，曾用于建立协作主稿。
+输入：根目录“医影知微_科技说明_初版.docx”，并检查选用的 assets/ 问答截图。
+输出：覆盖同名 .md；按 Word 正文顺序转换段落、标题、表格和两张图片，并提取流程图。
+依赖：python-docx；路径以脚本所在位置确定项目根目录。
+当前状态：一次性初始化工具；后续以 Markdown 为主，不应再用旧 Word 覆盖协作稿。
+"""
 
 from pathlib import Path
 from zipfile import ZipFile
