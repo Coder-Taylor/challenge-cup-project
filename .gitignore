@@ -13,9 +13,20 @@
 # 系统与编辑器
 Thumbs.db
 desktop.ini
-.DS_Store
 .vscode/
 .idea/
+
+# macOS 系统垃圾文件（Finder、Spotlight、外接卷、图标残留）
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100/
+.Trashes/
+.fseventsd/
+.TemporaryItems/
+.DocumentRevisions-V100/
+.apdisk
+Icon?
 
 # Python
 __pycache__/
